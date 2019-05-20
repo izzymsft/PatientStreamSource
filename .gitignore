@@ -56,4 +56,4 @@ obj
 bin
 local.settings.json
 .vscode
-
+appsettings.json
