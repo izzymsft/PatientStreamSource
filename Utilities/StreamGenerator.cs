@@ -6,6 +6,7 @@ using System.Threading.Tasks;
 using Microsoft.WindowsAzure;
 using Microsoft.WindowsAzure.Storage;
 using Microsoft.WindowsAzure.Storage.File;
+using Microsoft.WindowsAzure.Storage.Blob;
 using Microsoft.Azure.EventHubs;
 using System.Text;
 using PatientStreamSource.Models;
@@ -22,24 +23,40 @@ namespace PatientStreamSource.Utilities
 
         private readonly string EventHubConnectionString;
 
-        private string EventHubName;
+        private string EventHubNameTotals;
+        private string EventHubNameTemperature;
+        private string EventHubNamePulseAndPressure;
 
-        private EventHubClient eventHubClient;
+        private EventHubClient eventHubClientTotals;
+        private EventHubClient eventHubClientTemperature;
+        private EventHubClient eventHubClientPulsePressure;
 
-        public StreamGenerator(int patientCount, string storageKey, string fileShare, string eventHubConnection, string eventHubTopic)
+        public StreamGenerator(int patientCount, string eventHubConnection, string totalsTopic, string tempTopic, string pulsePressureTopic)
         {
             this.NumberOfPatients = patientCount;
-            this.StorageAccountConnection = storageKey;
-            this.FileShareName = fileShare;
             this.EventHubConnectionString = eventHubConnection;
-            this.EventHubName = eventHubTopic;
+            this.EventHubNameTotals = totalsTopic;
+            this.EventHubNameTemperature = tempTopic;
+            this.EventHubNamePulseAndPressure = pulsePressureTopic;
 
-            var connectionStringBuilder = new EventHubsConnectionStringBuilder(EventHubConnectionString)
+            var connectionStringBuilderTotals = new EventHubsConnectionStringBuilder(EventHubConnectionString)
             {
-                EntityPath = EventHubName
+                EntityPath = EventHubNameTotals
             };
 
-            this.eventHubClient = EventHubClient.CreateFromConnectionString(connectionStringBuilder.ToString());
+            var connectionStringBuilderTemperature = new EventHubsConnectionStringBuilder(EventHubConnectionString)
+            {
+                EntityPath = EventHubNameTemperature
+            };
+
+            var connectionStringBuilderPulseAndPressure = new EventHubsConnectionStringBuilder(EventHubConnectionString)
+            {
+                EntityPath = EventHubNameTotals
+            };
+
+            this.eventHubClientTotals = EventHubClient.CreateFromConnectionString(connectionStringBuilderTotals.ToString());
+            this.eventHubClientTemperature = EventHubClient.CreateFromConnectionString(connectionStringBuilderTemperature.ToString());
+            this.eventHubClientPulsePressure = EventHubClient.CreateFromConnectionString(connectionStringBuilderPulseAndPressure.ToString());
         }
 
         public void generatePatientValueRanges()
@@ -53,10 +70,10 @@ namespace PatientStreamSource.Utilities
         }
 
         // Generates totals, temperature, pulse and blood pressure data at the same time
-        // However, there is a simulation of delay in when the records arrive at event hub and blob storage
-        // Writes to the totals blob after delay
-        // Writes to the temperature blob after delay
-        // Writes to the pulse and pressure event hub after delay
+        // However, there is a simulation of delay in when the records arrive at event hub
+        // Writes to the totals store after delay
+        // Writes to the temperature store after delay
+        // Writes to the pulse and pressure store after delay
         private async Task generateSinglePatientRecordRange(int patientIdentifier) {
 
             var currentDate = DateTime.Now.ToString("yyyy-MM-dd");
@@ -95,71 +112,35 @@ namespace PatientStreamSource.Utilities
             Console.WriteLine(patientTemps.toCSVRow());
             Console.WriteLine(patientPulseAndBP.ToString());
 
-            string PatientShare = this.FileShareName;
+            string temperatureData = PatientTemperatures.getCSVHeader() + "\n" + patientTemps.toCSVRow();
 
-            var totalsFilePathPrefix = "patients/totals/" + currentDate;
-            var temperaturesFilePathPrefix = "patients/temperatures/" + currentDate;
+            await this.sendMessage("Totals", this.eventHubClientTotals, patientTotalsRecord.ToString(), firstPause);
+            await this.sendMessage("Temperature", this.eventHubClientTemperature, temperatureData.ToString(), secondPause);
+            await this.sendMessage("Pulse and Blood Pressure", this.eventHubClientPulsePressure, patientPulseAndBP.ToString(), thirdPause);
+        }
 
-            CloudStorageAccount storageAccount = CreateStorageAccountFromConnectionString(this.StorageAccountConnection);
-
-            CloudFileClient fileClient = storageAccount.CreateCloudFileClient();
-
-            CloudFileShare share = fileClient.GetShareReference(PatientShare);
-
-            try
-            {
-                await share.CreateIfNotExistsAsync();
-            }
-            catch (StorageException)
-            {
-                Console.WriteLine("Please make sure your storage account has storage file endpoint enabled and specified correctly in the app.config - then restart the sample.");
-            
-                throw; 
-            }
-
-            // Get a reference to the root directory of the share.        
-            CloudFileDirectory root = share.GetRootDirectoryReference();
-
-            Console.WriteLine("Creating Totals Directory");
-            CloudFileDirectory totalsDirectory = root.GetDirectoryReference(totalsFilePathPrefix);
-            await CreateRecursiveIfNotExists(totalsDirectory);
-
-            Console.WriteLine("Creating Temperature Directory");
-            CloudFileDirectory temperatureDirectory = root.GetDirectoryReference(temperaturesFilePathPrefix);
-            await CreateRecursiveIfNotExists(temperatureDirectory);
-
-            string totalBlobFilePath = "totals-" + patientId + "-" + simpleTimestamp + ".json";
-            string temperatureBlobFilePath = "temperature-" + patientId +  "-" + simpleTimestamp + ".csv";
-
-            Thread.Sleep(new TimeSpan(0, 0, firstPause));
-            Console.WriteLine("Uploading totals data to blob storage after pause: " + firstPause);
-            CloudFile totalsFile = totalsDirectory.GetFileReference(totalBlobFilePath);
-            await totalsFile.UploadTextAsync(patientTotalsRecord.ToString());
-
-            Thread.Sleep(new TimeSpan(0, 0, secondPause));
-            Console.WriteLine("Uploading temperature data to blob storage after pause: " + secondPause);
-            CloudFile tempsFile = temperatureDirectory.GetFileReference(temperatureBlobFilePath);
-            string tempData = PatientTemperatures.getCSVHeader() + "\n" + patientTemps.toCSVRow();
-            await tempsFile.UploadTextAsync(tempData);
-
-            // Convert C# object to JSON string
-            var msg = patientPulseAndBP.ToString();
+        private async Task sendMessage(string category, EventHubClient client, string message, int pauseDurationSeconds) {
                 
+            Console.WriteLine("Preparing Transfer for Category: " + category + " Pause Duration: " + pauseDurationSeconds);
+
             // Convert String to bytes
-            var rawMessage = Encoding.UTF8.GetBytes(msg);
+            var rawMessage = Encoding.UTF8.GetBytes(message);
                 
             // Package message as Event Data
             EventData eventData = new EventData(rawMessage);
 
-            Thread.Sleep(new TimeSpan(0, 0, thirdPause));
-            Console.WriteLine("Uploading pulse and pressure data to event hub after pause: " + thirdPause);
+            Thread.Sleep(new TimeSpan(0, 0, pauseDurationSeconds));
+            Console.WriteLine("Sending Data for " + category + " after pause: " + pauseDurationSeconds);
+            
             // Send the pulse and blood pressure data to Event Hub
-            await eventHubClient.SendAsync(eventData);
+            await client.SendAsync(eventData);
         }
 
         public void Close()
         {
-             this.eventHubClient.CloseAsync().Wait();
+             this.eventHubClientTotals.CloseAsync().Wait();
+             this.eventHubClientTemperature.CloseAsync().Wait();
+             this.eventHubClientPulsePressure.CloseAsync().Wait();
         }
 
         private async Task CreateRecursiveIfNotExists(CloudFileDirectory directory)

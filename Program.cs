@@ -34,14 +34,13 @@ namespace PatientStreamSource
             var numberOfPatients = 1;
 
             Console.WriteLine("Generating Patient Stream Data to Event Hub and Blob Storage ...");
-
-            string storageKey = config.GetConnectionString("StorageKey");
-            string fileShareName = config.GetConnectionString("FileShareName");
             
             string eventHubConnectionString = config.GetConnectionString("EventHubConnection");
-            string eventHubTopic = config.GetConnectionString("EventHubName");
+            string eventHubTopicTotals = config.GetConnectionString("EventHubNameTotals");
+            string eventHubTopicTemperature = config.GetConnectionString("EventHubNameTemperature");
+            string eventHubTopicPulseAndPressure = config.GetConnectionString("EventHubNamePulseAndPressure");
 
-            var generator = new StreamGenerator(numberOfPatients, storageKey, fileShareName, eventHubConnectionString, eventHubTopic);
+            var generator = new StreamGenerator(numberOfPatients, eventHubConnectionString, eventHubTopicTotals, eventHubTopicTemperature, eventHubTopicPulseAndPressure);
 
             generator.generatePatientValueRanges();
 
