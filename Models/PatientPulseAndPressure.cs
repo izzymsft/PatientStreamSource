@@ -15,7 +15,6 @@ namespace PatientStreamSource.Models
         public double MaxDiastolic { get; set; }
         public double MinSystolic { get; set; }
         public double MaxSystolic { get; set; }
-
         public string VitalTimestamp { get; set; }
 
         public PatientPulseAndPressure()

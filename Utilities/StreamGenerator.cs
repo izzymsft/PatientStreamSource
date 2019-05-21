@@ -26,18 +26,21 @@ namespace PatientStreamSource.Utilities
         private string EventHubNameTotals;
         private string EventHubNameTemperature;
         private string EventHubNamePulseAndPressure;
+        private string EventHubNameJobInfo;
 
         private EventHubClient eventHubClientTotals;
         private EventHubClient eventHubClientTemperature;
         private EventHubClient eventHubClientPulsePressure;
+        private EventHubClient eventHubClientJobInfo;
 
-        public StreamGenerator(int patientCount, string eventHubConnection, string totalsTopic, string tempTopic, string pulsePressureTopic)
+        public StreamGenerator(int patientCount, string eventHubConnection, string totalsTopic, string tempTopic, string pulsePressureTopic, string jobInfoTopic)
         {
             this.NumberOfPatients = patientCount;
             this.EventHubConnectionString = eventHubConnection;
             this.EventHubNameTotals = totalsTopic;
             this.EventHubNameTemperature = tempTopic;
             this.EventHubNamePulseAndPressure = pulsePressureTopic;
+            this.EventHubNameJobInfo = jobInfoTopic;
 
             var connectionStringBuilderTotals = new EventHubsConnectionStringBuilder(EventHubConnectionString)
             {
@@ -54,9 +57,16 @@ namespace PatientStreamSource.Utilities
                 EntityPath = EventHubNameTotals
             };
 
+            var connectionStringBuilderJobInfo = new EventHubsConnectionStringBuilder(EventHubConnectionString)
+            {
+                EntityPath = EventHubNameJobInfo
+            };
+
             this.eventHubClientTotals = EventHubClient.CreateFromConnectionString(connectionStringBuilderTotals.ToString());
             this.eventHubClientTemperature = EventHubClient.CreateFromConnectionString(connectionStringBuilderTemperature.ToString());
             this.eventHubClientPulsePressure = EventHubClient.CreateFromConnectionString(connectionStringBuilderPulseAndPressure.ToString());
+            this.eventHubClientJobInfo = EventHubClient.CreateFromConnectionString(connectionStringBuilderJobInfo.ToString());
+
         }
 
         public void generatePatientValueRanges()
@@ -69,6 +79,21 @@ namespace PatientStreamSource.Utilities
             }
         }
 
+        public void generateByPass()
+        {
+            this.generateByPassJobInfo().Wait();
+        }
+        
+        private async Task generateByPassJobInfo()
+        {
+            JobInfo jobInfo = new JobInfo();
+
+            Console.WriteLine("Generating ByPass JobInfo");
+            Console.WriteLine(jobInfo.ToString());
+
+            await this.sendMessage("Job Info ByPass", this.eventHubClientJobInfo, jobInfo.ToString(), 1);
+        }
+
         // Generates totals, temperature, pulse and blood pressure data at the same time
         // However, there is a simulation of delay in when the records arrive at event hub
         // Writes to the totals store after delay
@@ -77,7 +102,7 @@ namespace PatientStreamSource.Utilities
         private async Task generateSinglePatientRecordRange(int patientIdentifier) {
 
             var currentDate = DateTime.Now.ToString("yyyy-MM-dd");
-            var timestamp = DateTime.Now.ToString("yyyy-MM-dd'T'HHmmss.fffK");
+            var captureTimestamp = DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss.fff");
             var simpleTimestamp = DateTime.Now.ToString("yyyy-MM-ddHHmmssfff");
 
             Random random = new Random();
@@ -100,9 +125,9 @@ namespace PatientStreamSource.Utilities
             int secondPause = random.Next(3, 5);
             int thirdPause = random.Next(8, 13);
 
-            var patientTotalsRecord = new PatientTotals(patientId, total);
-            var patientTemps = new PatientTemperatures(patientId, minTemperature, maxTemperature, timestamp);
-            var patientPulseAndBP = new PatientPulseAndPressure(patientId, minPulse, maxPulse, minDiastolic, maxDiastolic, minSystolic, maxSystolic, timestamp);
+            var patientTotalsRecord = new PatientTotals(patientId, total, captureTimestamp);
+            var patientTemps = new PatientTemperatures(patientId, minTemperature, maxTemperature, captureTimestamp);
+            var patientPulseAndBP = new PatientPulseAndPressure(patientId, minPulse, maxPulse, minDiastolic, maxDiastolic, minSystolic, maxSystolic, captureTimestamp);
 
             Console.WriteLine("\n");
             Console.WriteLine("========================================================================");
@@ -141,6 +166,7 @@ namespace PatientStreamSource.Utilities
              this.eventHubClientTotals.CloseAsync().Wait();
              this.eventHubClientTemperature.CloseAsync().Wait();
              this.eventHubClientPulsePressure.CloseAsync().Wait();
+             this.eventHubClientJobInfo.CloseAsync().Wait();
         }
 
         private async Task CreateRecursiveIfNotExists(CloudFileDirectory directory)
