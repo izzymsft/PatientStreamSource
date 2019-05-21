@@ -1,0 +1,12 @@
+{
+        "id" : "e23ebc4",
+        "total": 16,
+        "min_temperature": 98.5,
+        "max_temperature": 99.8,
+        "min_pulse": 80,
+        "max_pulse": 85,
+        "min_diastolic": 85,
+        "max_diastolic": 90,
+        "min_systolic": 120,
+        "max_systolic": 130
+}
